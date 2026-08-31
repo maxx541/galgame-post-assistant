@@ -1,0 +1,7 @@
+# 統一用 LF，避免不同系統之間整份檔案顯示成有改動
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.webp binary

@@ -1,0 +1,28 @@
+# 相依套件與建置產物
+web/node_modules
+web/.nuxt
+web/.output
+web/.data
+node_modules
+
+# 金鑰與登入狀態
+web/.env
+data/settings.json
+data/.browser/
+
+# 使用者資料：素材、貼文、圖片、候選、日誌。
+# 這些是每個人自己的東西，而且圖片很快就幾百 MB。
+# 程式第一次跑會自己建這些資料夾。
+data/
+
+# 規範存檔時自動產生的備份
+文案撰寫規範.md.bak
+
+# 開發過程的工作筆記，不是給使用者看的
+發掘功能進度.md
+
+# 編輯器／工具的暫存
+.claude/
+.vscode/
+.idea/
+*.log

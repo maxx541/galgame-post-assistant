@@ -1,0 +1,213 @@
+:root {
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --panel-2: #fbfaf8;
+  --line: #e3e0da;
+  --line-strong: #cfcbc2;
+  --text: #23211e;
+  --muted: #77726a;
+  --faint: #a29c93;
+  --accent: #3f5bd6;
+  --accent-soft: #eaeeff;
+  --err: #c0392b;
+  --err-soft: #fdeceb;
+  --warn: #b0761b;
+  --warn-soft: #fdf3e2;
+  --info: #4a7ba8;
+  --info-soft: #edf4fa;
+  --ok: #2f8f5b;
+  --ok-soft: #e9f6ef;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a;
+    --panel: #1f2124;
+    --panel-2: #242629;
+    --line: #33363b;
+    --line-strong: #45494f;
+    --text: #e6e4e0;
+    --muted: #9a958d;
+    --faint: #6f6a63;
+    --accent: #7b93f0;
+    --accent-soft: #232941;
+    --err: #f07167;
+    --err-soft: #3a2523;
+    --warn: #e0a94a;
+    --warn-soft: #362d1d;
+    --info: #7fb0d8;
+    --info-soft: #1e2a33;
+    --ok: #63c48d;
+    --ok-soft: #1e2f26;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* 捲軸。不設的話瀏覽器會畫成淺色的，深色模式下那條白邊非常刺眼。
+   color-scheme 讓原生控制項（下拉、日期選擇器）也跟著切；
+   下面的 ::-webkit- 是再把樣式收乾淨一點。 */
+:root { color-scheme: light dark; }
+html { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+html, body, #__nuxt { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.7 "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button, input, textarea, select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  border-radius: 7px;
+  padding: 6px 13px;
+  transition: background 0.12s, border-color 0.12s;
+}
+button:hover:not(:disabled) { background: var(--panel-2); border-color: var(--muted); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+button.ghost:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
+button.danger { color: var(--err); border-color: var(--line-strong); }
+button.danger:hover:not(:disabled) { background: var(--err-soft); border-color: var(--err); }
+button.sm { padding: 3px 9px; font-size: 13px; border-radius: 6px; }
+
+/* 用排除法而不是逐一列舉——之前漏掉 number/password/datetime-local，
+   那些欄位吃瀏覽器預設的白底，深色模式下直接看不見 */
+input:not([type='checkbox']):not([type='radio']):not([type='file']),
+textarea,
+select {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 10px;
+  outline: none;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* 數字欄位的上下箭頭在深色底下是黑的，看不到；讓它跟著文字色走 */
+input[type='number'] { accent-color: var(--accent); }
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button { opacity: 0.55; }
+input[type='number']:hover::-webkit-inner-spin-button,
+input[type='number']:focus::-webkit-inner-spin-button { opacity: 1; }
+input[type='datetime-local']::-webkit-calendar-picker-indicator { filter: invert(0.5); }
+::placeholder { color: var(--faint); }
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.topbar .brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-right: 6px;
+}
+.topbar nav { display: flex; gap: 4px; }
+.topbar nav a {
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 14px;
+}
+.topbar nav a:hover { background: var(--panel-2); text-decoration: none; color: var(--text); }
+.topbar nav a.router-link-active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.topbar .spacer { flex: 1; }
+
+.page { padding: 22px 20px 60px; max-width: 1500px; width: 100%; margin: 0 auto; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.h1 { font-size: 20px; font-weight: 700; margin: 0; }
+.h2 { font-size: 15px; font-weight: 700; margin: 0; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.small { font-size: 13px; }
+.tiny { font-size: 12px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.wrap { flex-wrap: wrap; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.grow { flex: 1; min-width: 0; }
+.mono {
+  font-family: "Cascadia Mono", Consolas, "Noto Sans TC", monospace;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.solid { color: #fff; border-color: transparent; }
+.badge.plat { background: var(--panel-2); }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > label { font-size: 12px; color: var(--muted); font-weight: 600; }
+
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
