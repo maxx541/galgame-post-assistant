@@ -81,6 +81,27 @@ export function specPath(): string {
   return custom ? resolve(custom) : resolve(process.cwd(), '..', '文案撰寫規範.md')
 }
 
+/**
+ * 規範檔不存在就建一個空的。
+ *
+ * 版本庫裡不放任何範本 —— 撰寫規範是每個社群自己的東西，
+ * 塞一份別人的進去只會讓產出像別人。使用者要自己丟。
+ */
+export async function ensureSpec(): Promise<string> {
+  const p = specPath()
+  if (!(await exists(p))) await fs.writeFile(p, '', 'utf8')
+  return p
+}
+
+/** 規範是不是還沒填。空白或只有空行都算 */
+export async function specIsEmpty(): Promise<boolean> {
+  try {
+    return !(await fs.readFile(specPath(), 'utf8')).trim()
+  } catch {
+    return true
+  }
+}
+
 export async function ensureDir(p: string) {
   await fs.mkdir(p, { recursive: true })
 }

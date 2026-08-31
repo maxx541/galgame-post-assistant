@@ -15,8 +15,13 @@ export default defineEventHandler(async event => {
     platforms?: string[]
   }>(event)
 
-  const sp = specPath()
-  if (!(await exists(sp))) throw createError({ statusCode: 500, message: '找不到 文案撰寫規範.md：' + sp })
+  const sp = await ensureSpec()
+  if (await specIsEmpty()) {
+    throw createError({
+      statusCode: 400,
+      message: '還沒有撰寫規範。到「撰寫規範」頁把你自己的規範文件丟進去，AI 才知道要照什麼寫。'
+    })
+  }
   const spec = await fs.readFile(sp, 'utf8')
   const perPlatform = Math.min(Math.max(Number(body?.perPlatform) || 2, 1), 3)
   const settings = await loadSettings()

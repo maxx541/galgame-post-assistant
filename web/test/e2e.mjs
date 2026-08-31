@@ -2369,6 +2369,35 @@ console.log('\n### 33. 發掘頁：三欄並列＋設定彈窗')
     css.includes('::-webkit-scrollbar-track') && css.includes('background: transparent'))
   ok('原生控制項也跟著切主題', css.includes('color-scheme: light dark'))
 }
+{
+  // 規範是每個社群自己的東西，版本庫裡不放任何一份（連範本都不放）
+  const st = await fs.readFile(join(HERE, '..', 'server', 'utils', 'store.ts'), 'utf8')
+  ok('規範不存在就建一個空的', st.includes('ensureSpec') && st.includes("writeFile(p, ''"))
+  ok('沒有任何內建範本', !st.includes('example.md'))
+  ok('判斷得出規範還沒填', st.includes('specIsEmpty'))
+
+  const gen = await fs.readFile(join(HERE, '..', 'server', 'api', 'generate.post.ts'), 'utf8')
+  ok('沒有規範就不讓撰寫', gen.includes('await specIsEmpty()') && gen.includes('還沒有撰寫規範'))
+  ok('錯誤訊息指路', gen.includes('撰寫規範'))
+
+  const page = await fs.readFile(join(HERE, '..', 'app', 'pages', 'spec.vue'), 'utf8')
+  ok('空的時候有引導', page.includes('還沒有撰寫規範') && page.includes('dropzone'))
+  ok('可以拖曳檔案進來', page.includes('@drop.prevent="onDrop"') && page.includes('readAsText'))
+  ok('也可以選檔案', page.includes('type="file"') && page.includes('accept=".md'))
+  ok('讀進來先填編輯區，不直接覆蓋檔案',
+    /function readFile[\s\S]{0,400}draft\.value = String/.test(page) &&
+    !/function readFile[\s\S]{0,400}\$fetch/.test(page))
+  ok('填好之後引導就不擋著', page.includes('const isEmpty = computed'))
+
+  const gi = await fs.readFile(join(HERE, '..', '..', '.gitignore'), 'utf8')
+  ok('規範不進版控', /^文案撰寫規範\.md$/m.test(gi))
+  ok('使用者資料整個不進版控', /^data\/$/m.test(gi))
+  ok('金鑰與登入狀態不進版控',
+    gi.includes('data/settings.json') && gi.includes('web/.env') && gi.includes('data/.browser/'))
+
+  const r = await j('GET', '/api/spec')
+  ok('規範讀得到，並回報空不空', r.status === 200 && 'empty' in r.data)
+}
 
 console.log(`\n${'='.repeat(46)}\n通過 ${pass} 項，失敗 ${fail} 項`)
 if (fail) { console.log('失敗項目：\n - ' + fails.join('\n - ')); process.exit(1) }

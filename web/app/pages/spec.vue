@@ -13,11 +13,34 @@
     </div>
 
     <p class="small muted" style="margin-top: 0">
-      這份規範同時是 <strong>AI 撰寫的 system prompt</strong> 與 <strong>編輯器規範檢查的依據</strong>。
-      改完存檔，下一次撰寫就會照新的規則寫。存檔前會自動備份成
-      <code class="mono">文案撰寫規範.md.bak</code>。
+      這份規範是 <strong>AI 撰寫的 system prompt</strong>，也是規範檢查的依據。存檔前會自動備份成
+      <code class="mono">.bak</code>。
     </p>
     <p v-if="msg" class="small" :class="msgErr ? 'm-err' : 'm-ok'">{{ msg }}</p>
+
+    <!-- 還沒有規範時的引導。工具不附任何範本，一定要使用者自己丟 -->
+    <div
+      v-if="isEmpty"
+      class="dropzone"
+      :class="{ over }"
+      @dragover.prevent="over = true"
+      @dragleave="over = false"
+      @drop.prevent="onDrop"
+    >
+      <strong>還沒有撰寫規範</strong>
+      <p style="margin: 6px 0 0">
+        這個工具不附任何範本 —— 規範是你自己社群的東西，塞別人的進去只會讓產出像別人。
+        <b>把你的規範文件丟進來</b>，或按「編輯」直接貼上。沒有規範就不能撰寫。
+      </p>
+      <div class="row" style="gap: 8px; margin-top: 10px; justify-content: center">
+        <input ref="fileEl" type="file" accept=".md,.markdown,.txt,text/*" hidden @change="onPick" />
+        <button class="primary" @click="fileEl?.click()">選檔案</button>
+        <button @click="editing = true">直接貼上</button>
+      </div>
+      <p class="tiny faint" style="margin: 10px 0 0">
+        內容會整份當成 system prompt 送出。放幾則你覺得寫得好的成品，效果比抽象描述好得多。
+      </p>
+    </div>
 
     <textarea
       v-if="editing"
@@ -26,7 +49,7 @@
       spellcheck="false"
       @keydown.ctrl.s.prevent="save"
     />
-    <article v-else class="card md" v-html="html" />
+    <article v-else-if="!isEmpty" class="card md" v-html="html" />
 
     <p class="tiny faint" style="margin-top: 10px">
       {{ editing ? 'Ctrl+S 也可以存檔。' : '' }}{{ spec?.path }}
@@ -36,7 +59,11 @@
 
 <script setup lang="ts">
 const { toast, toastErr } = useToast()
-const { data: spec, refresh } = await useFetch<{ ok: boolean; content: string; path: string }>('/api/spec')
+const { data: spec, refresh } = await useFetch<{
+  ok: boolean; content: string; empty?: boolean; path: string
+}>('/api/spec')
+
+
 
 const editing = ref(false)
 const saving = ref(false)
@@ -44,6 +71,39 @@ const msg = ref('')
 const msgErr = ref(false)
 const original = ref(spec.value?.content || '')
 const draft = ref(spec.value?.content || '')
+
+const over = ref(false)
+const fileEl = ref<HTMLInputElement | null>(null)
+/** 還沒填的時候顯示引導；正在編輯就不擋著 */
+const isEmpty = computed(() => !draft.value.trim() && !editing.value)
+
+function onDrop(e: DragEvent) {
+  over.value = false
+  const f = e.dataTransfer?.files?.[0]
+  if (f) readFile(f)
+}
+function onPick(e: Event) {
+  const el = e.target as HTMLInputElement
+  const f = el.files?.[0]
+  if (f) readFile(f)
+  el.value = ''
+}
+
+/** 讀進來只填到編輯區，不直接存檔 —— 讓使用者先看一眼 */
+function readFile(f: File) {
+  const r = new FileReader()
+  r.onload = () => {
+    draft.value = String(r.result || '')
+    editing.value = true
+    msgErr.value = false
+    msg.value = `已讀入「${f.name}」，確認內容之後按儲存。`
+  }
+  r.onerror = () => {
+    msgErr.value = true
+    msg.value = '這個檔案讀不到'
+  }
+  r.readAsText(f, 'utf-8')
+}
 const dirty = computed(() => draft.value !== original.value)
 
 async function save() {
@@ -153,6 +213,13 @@ const html = computed(() => {
 .spec { max-width: 940px; }
 .m-ok { color: var(--ok); }
 .m-err { color: var(--err); }
+.dropzone {
+  border: 2px dashed var(--line-strong); border-radius: 10px;
+  padding: 26px 20px; text-align: center; color: var(--muted);
+  background: var(--panel-2); line-height: 1.7;
+}
+.dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone strong { color: var(--text); font-size: 15px; }
 .editor {
   width: 100%; min-height: 70vh; line-height: 1.7; font-size: 13.5px;
   background: var(--panel); resize: vertical;
