@@ -9,6 +9,9 @@
 
 版面固定寫在這裡，內容每次從 data/ 讀 —— 所以每次只換內容，不重寫網頁。
 
+貼文預覽是可以直接改的：頁面把改動存進 Artifact 的 db，Claude 再用
+read_db 拉回來寫進 variants/*.md。頁面碰不到本機（沙盒），db 是唯一的橋。
+
 直接讀檔不打 API：這樣 dev server 沒開也產得出來，而且不會因為端點改動就壞。
 圖片一定要嵌成 data URI，Artifact 的沙盒連不到本機的 localhost。
 """
@@ -153,11 +156,191 @@ details.origin p { margin: 8px 0 0; white-space: pre-wrap; }
 .note { margin: 0; color: var(--faint); font-size: 12px; border-top: 1px dashed var(--line); padding-top: 8px; }
 .published { background: var(--ok-soft); color: var(--ok); border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 18px; }
 .published a { color: var(--ok); }
+.vhead { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.editbtn {
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; font: inherit;
+  font-size: 12px; line-height: 1.5;
+}
+.editbtn:hover { color: var(--ink); }
+.editbtn[hidden] { display: none !important; }
+textarea.body {
+  width: 100%; min-height: 120px; resize: vertical;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px;
+  font: inherit; font-size: 14.5px; line-height: 1.75;
+}
+.savebar {
+  position: sticky; bottom: 0; margin-top: 16px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  display: flex; align-items: center; gap: 10px; font-size: 13px;
+  box-shadow: 0 -2px 16px rgba(0,0,0,.10);
+}
+.savebar button {
+  border: none; background: var(--accent); color: #fff; font: inherit; font-size: 13px;
+  font-weight: 600; border-radius: 8px; padding: 8px 16px; cursor: pointer;
+}
+.savebar button:disabled { opacity: .45; cursor: not-allowed; }
+.savestate { color: var(--muted); flex: 1; min-width: 0; }
+.savestate.ok { color: var(--ok); }
+.savestate.bad { color: var(--warn); }
 footer { margin-top: 26px; color: var(--faint); font-size: 11.5px; line-height: 1.8; border-top: 1px solid var(--line); padding-top: 12px; }
 '''
 
 
-def render(title, hero, gallery, heading, sub, chips, origin_label, origin_text, blocks, footer):
+EDIT_SCRIPT = """
+<div class="savebar" id="savebar" hidden>
+  <span class="savestate" id="savestate">改好之後按儲存，再回訊息告訴我，我把它寫回本機</span>
+  <button id="savebtn" disabled>儲存修改</button>
+</div>
+<script>
+(function () {
+  var POST_ID = %POST_ID%;
+  var bar = document.getElementById('savebar');
+  var state = document.getElementById('savestate');
+  var btn = document.getElementById('savebtn');
+  var dirty = false;
+  var db = null;
+
+  function bodies() {
+    return Array.prototype.slice.call(document.querySelectorAll('.variant[data-vid]'));
+  }
+
+  function say(msg, cls) {
+    state.textContent = msg;
+    state.className = 'savestate' + (cls ? ' ' + cls : '');
+  }
+
+  function recount(box) {
+    var ta = box.querySelector('textarea.body');
+    var el = box.querySelector('.count');
+    var limit = Number(box.getAttribute('data-limit')) || 0;
+    var n = Array.from(ta.value).length;
+    el.textContent = n + ' 字' + (limit ? ' / 上限 ' + limit : '');
+    el.className = 'count' + (limit && n > limit ? ' over' : '');
+  }
+
+  function grow(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(120, ta.scrollHeight + 4) + 'px';
+  }
+
+  bodies().forEach(function (box) {
+    var para = box.querySelector('p.body');
+    var ta = box.querySelector('textarea.body');
+    var original = ta.value;
+    var bEdit = box.querySelector('[data-act=edit]');
+    var bDone = box.querySelector('[data-act=done]');
+    var bReset = box.querySelector('[data-act=reset]');
+
+    function mode(editing) {
+      para.hidden = editing;
+      ta.hidden = !editing;
+      bEdit.hidden = editing;
+      bDone.hidden = !editing;
+      bReset.hidden = !editing || ta.value === original;
+      if (editing) { grow(ta); ta.focus(); }
+    }
+
+    bEdit.addEventListener('click', function (e) { e.preventDefault(); mode(true); });
+    bDone.addEventListener('click', function (e) {
+      e.preventDefault();
+      para.textContent = ta.value;
+      mode(false);
+    });
+    bReset.addEventListener('click', function (e) {
+      e.preventDefault();
+      ta.value = original;
+      para.textContent = original;
+      recount(box);
+      mode(true);
+      markDirty();
+    });
+    ta.addEventListener('input', function () {
+      grow(ta);
+      recount(box);
+      bReset.hidden = ta.value === original;
+      markDirty();
+    });
+    // summary 裡的按鈕會觸發 details 開合，擋掉
+    box.querySelector('summary').addEventListener('click', function (e) {
+      if (e.target.closest('.editbtn')) e.preventDefault();
+    });
+  });
+
+  function markDirty() {
+    dirty = true;
+    if (db) { btn.disabled = false; say('有未儲存的修改'); }
+  }
+
+  function collect() {
+    var out = {};
+    bodies().forEach(function (box) {
+      out[box.getAttribute('data-vid')] = box.querySelector('textarea.body').value;
+    });
+    return out;
+  }
+
+  btn.addEventListener('click', function () {
+    if (!db) return;
+    btn.disabled = true;
+    say('儲存中…');
+    db.doc('edits/current').set({
+      postId: POST_ID,
+      variants: collect(),
+      savedAt: new Date().toISOString()
+    }).then(function () {
+      dirty = false;
+      say('已儲存。回訊息跟我說一聲，我把它寫回本機的貼文檔', 'ok');
+    }).catch(function (e) {
+      btn.disabled = false;
+      var code = (e && e.code) || 'unknown';
+      say(code === 'not_granted'
+        ? '這個檢視沒有寫入權限，改用複製貼上給我'
+        : '存不起來（' + code + '），改用複製貼上給我', 'bad');
+    });
+  });
+
+  window.addEventListener('beforeunload', function (e) {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  // 能力是後到的，先把頁面當唯讀渲染，等它回來才點亮編輯
+  if (!window.claude || !window.claude.use) return;
+  window.claude.use('db').then(function (ns) {
+    if (!ns) { say('這個檢視不能存檔，改完用複製貼上給我', 'bad'); bar.hidden = false; return; }
+    db = ns;
+    bar.hidden = false;
+    bodies().forEach(function (box) { box.querySelector('[data-act=edit]').hidden = false; });
+    return db.doc('edits/current').get().then(function (snap) {
+      if (!snap.exists) return;
+      var d = snap.data() || {};
+      if (d.postId !== POST_ID) return;
+      var saved = d.variants || {};
+      var n = 0;
+      bodies().forEach(function (box) {
+        var vid = box.getAttribute('data-vid');
+        if (typeof saved[vid] !== 'string') return;
+        var ta = box.querySelector('textarea.body');
+        if (saved[vid] === ta.value) return;
+        ta.value = saved[vid];
+        box.querySelector('p.body').textContent = saved[vid];
+        box.querySelector('[data-act=reset]').hidden = false;
+        recount(box);
+        n++;
+      });
+      if (n) say('顯示的是你上次存的修改（' + n + ' 版），還沒寫回本機', 'ok');
+    });
+  }).catch(function () {
+    say('能力載入失敗，改完用複製貼上給我', 'bad');
+  });
+})();
+</script>
+"""
+
+
+def render(title, hero, gallery, heading, sub, chips, origin_label, origin_text,
+           blocks, footer, script=''):
     gal = ''
     if gallery:
         gal = '<div class="gallery">' + ''.join(
@@ -182,6 +365,7 @@ def render(title, hero, gallery, heading, sub, chips, origin_label, origin_text,
   <div class="variants">{blocks}</div>
   <footer>{footer}</footer>
 </div>
+{script}
 '''
 
 
@@ -216,15 +400,22 @@ def build_post(pid):
         limit = PLAT_LIMIT.get(plat)
         over = limit is not None and n > limit
         count = f'{n} 字' + (f' / 上限 {limit}' if limit else '')
+        vid = esc(v.get('id') or '')
         blocks.append(f'''
-      <details class="variant" open>
-        <summary>
+      <details class="variant" open data-vid="{vid}" data-limit="{limit or 0}">
+        <summary class="vhead">
           <span class="plat plat-{esc(plat)}">{esc(PLAT_NAME.get(plat, plat))}</span>
           <span class="vlabel">{esc(v.get("label"))}</span>
           <span class="spacer"></span>
           <span class="count{' over' if over else ''}">{esc(count)}</span>
         </summary>
         <p class="body">{esc(body)}</p>
+        <textarea class="body" hidden>{esc(body)}</textarea>
+        <div class="vhead" style="margin-bottom:6px">
+          <button class="editbtn" data-act="edit" hidden>編輯</button>
+          <button class="editbtn" data-act="done" hidden>完成</button>
+          <button class="editbtn" data-act="reset" hidden>還原</button>
+        </div>
         {f'<p class="note">{esc(v.get("note"))}</p>' if v.get('note') else ''}
       </details>''')
 
@@ -256,7 +447,8 @@ def build_post(pid):
         origin_label='原始素材內容',
         origin_text=post.get('note'),
         blocks=''.join(blocks),
-        footer=f'貼文工作台 · {esc(pid)}{foot_tail}'
+        footer=f'貼文工作台 · {esc(pid)}{foot_tail}',
+        script=EDIT_SCRIPT.replace('%POST_ID%', json.dumps(pid, ensure_ascii=False))
     )
 
 
