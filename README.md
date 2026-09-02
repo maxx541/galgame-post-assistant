@@ -39,7 +39,7 @@ AI 撰寫需要一組 **OpenAI 相容的 Chat Completions** 端點與金鑰。�
 
 ## 開始
 
-**Windows**：雙擊 `啟動.bat`，第一次會自動裝套件，跑起來自動開瀏覽器。
+**Windows**：雙擊 `貼文自動平台.bat`，第一次會自動裝套件，跑起來自動開瀏覽器。
 
 **其他系統**或想自己跑：
 
@@ -191,7 +191,7 @@ npm run build
 ## 專案結構
 
 ```
-啟動.bat              Windows 啟動器（純 ASCII，邏輯在 tools/start.ps1）
+貼文自動平台.bat      Windows 啟動器（純 ASCII，邏輯在 tools/start.ps1）
 tools/
   x_scraper.py        Playwright 推特抓取
   start.ps1           啟動邏輯
