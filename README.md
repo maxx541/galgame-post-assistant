@@ -101,6 +101,56 @@ IG 與 Threads 的 API 只吃公開網址的圖片，不能直接上傳檔案。
 
 ---
 
+## 從手機操作
+
+這個工具綁在跑它的那台電腦上（本機檔案、登入過的瀏覽器 profile、常駐排程器），
+所以手機不是連到雲端，而是**遙控那台電腦**。
+
+用 Claude Code 的 Remote Control 接上電腦上的 session 之後，整條流程可以用打字完成：
+
+```
+手機打字：「這篇 https://… 收進來，AI 寫一版」
+   ↓  Claude 呼叫跟按鈕背後同一支 API（收素材 → 撰寫）
+   ↓  py tools/preview.py post <貼文id>
+   ↓  發佈成 Artifact
+手機收到連結 → 點開看排版好的結果 → 覺得可以就回「發 FB 跟 IG」
+```
+
+傳圖片也可以：從手機附加的照片會落地成電腦上的檔案，Claude 直接把它
+上傳進素材資料夾，跟你在網頁上拖曳一樣。
+
+### 預覽頁
+
+`tools/preview.py` 把一則貼文或素材算成一頁 HTML。版面固定寫在那支程式裡，
+內容每次從 `data/` 讀 —— 每次只換內容，不重寫網頁。
+
+```bash
+py tools/preview.py post <貼文id>        # 三平台版本、字數、待補提醒、發佈狀態
+py tools/preview.py material <素材id>    # 原文與圖，還沒撰寫時用
+```
+
+它直接讀檔不打 API，所以 dev server 沒開也產得出來。圖片會嵌成 data URI
+（Artifact 的沙盒連不到本機的 localhost），有大小與張數上限，超出的會在
+畫面上標明跳過幾張。
+
+### 在預覽上直接改
+
+預覽頁的每個版本都可以點「編輯」直接改文字，字數即時重算。但**頁面在
+Artifact 的沙盒裡，碰不到本機檔案**，所以改動是存進 Artifact 的 db 當中轉：
+
+```
+你在頁面上改 → 按儲存 → 寫進 db 的 edits/current
+你回訊息說一聲 → Claude 用 read_db 拉下來
+   ↓  py tools/apply_edits.py <貼文id> <拉下來的 json>
+變更寫回 data/posts/<id>/variants/*.md
+```
+
+db 寫入不會主動通知，所以存完要回一句話才會套用。回寫只動內文，
+frontmatter（版本 id、平台、AI 的撰寫理由）不碰，而且會先比對貼文 id，
+避免把 A 的修改蓋到 B 上。
+
+---
+
 ## 設定
 
 ### AI 撰寫
@@ -194,6 +244,8 @@ npm run build
 貼文自動平台.bat      Windows 啟動器（純 ASCII，邏輯在 tools/start.ps1）
 tools/
   x_scraper.py        Playwright 推特抓取
+  preview.py          把貼文／素材算成一頁 HTML 預覽
+  apply_edits.py      把預覽頁上的修改寫回本機
   start.ps1           啟動邏輯
 web/
   app/pages/          發掘、素材夾、貼文、設定、日誌
