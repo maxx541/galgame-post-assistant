@@ -24,7 +24,7 @@ AI 撰寫 ── 依規範判斷體裁、寫出多個語氣版本
 
 **本機工具**：後端直接讀寫這個資料夾、會開本機瀏覽器與檔案總管，不能部署到雲端。
 
-![貼文列表](docs/posts.png)
+![貼文列表](docs/posts.webp)
 
 ---
 
@@ -60,7 +60,7 @@ npm run dev             # http://localhost:4321
 
 ### 發掘
 
-![發掘](docs/discover.png)
+![發掘](docs/discover.webp)
 
 三個來源並排，各自抓取、各自排程、各自捲動：
 
@@ -76,7 +76,7 @@ npm run dev             # http://localhost:4321
 
 ### 素材夾
 
-![素材夾](docs/inbox.png)
+![素材夾](docs/inbox.webp)
 
 兩種收法：**貼連結**（自動抓標題、內文、圖片、來源）或**本地素材**（自己貼文字與圖）。
 

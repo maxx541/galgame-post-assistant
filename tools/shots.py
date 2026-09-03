@@ -9,6 +9,7 @@
 刻意不拍設定頁 —— 那頁有粉專名稱、帳號 ID 這些不該進公開版本庫的東西。
 """
 
+import io
 import os
 import sys
 
@@ -41,7 +42,7 @@ def main():
         browser = p.chromium.launch()
         ctx = browser.new_context(
             viewport={'width': 1440, 'height': 900},  # 每張再各自調整
-            device_scale_factor=2,          # 2x 才不會在 GitHub 上糊掉
+            device_scale_factor=1.5,        # 1.5x：夠清楚，檔案又不會肥到手機開不動
             color_scheme='dark',
             locale='zh-TW'
         )
@@ -55,8 +56,12 @@ def main():
             except Exception:
                 print(f'  {name}: 等不到 {wait_for}，還是照拍')
             page.wait_for_timeout(1200)      # 讓圖片與字體載完
-            dest = os.path.join(OUT, name + '.png')
-            page.screenshot(path=dest)
+
+            # 存 WebP：同樣畫質下大概是 PNG 的三分之一，GitHub 的 README 吃這個格式
+            from PIL import Image
+            shot = Image.open(io.BytesIO(page.screenshot())).convert('RGB')
+            dest = os.path.join(OUT, name + '.webp')
+            shot.save(dest, 'WEBP', quality=82, method=6)
             print(f'  {name} → {dest} ({os.path.getsize(dest) // 1024} KB)')
 
         browser.close()
