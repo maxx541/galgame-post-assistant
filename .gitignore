@@ -23,6 +23,8 @@ data/
 發掘功能進度.md
 
 # 編輯器／工具的暫存
+__pycache__/
+*.pyc
 .claude/
 .vscode/
 .idea/
