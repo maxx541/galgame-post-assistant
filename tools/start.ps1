@@ -43,6 +43,11 @@ if (-not (Test-Path (Join-Path $Root 'web\node_modules'))) {
         exit 1
     }
 }
+elseif (-not (Test-Path (Join-Path $Root 'web\node_modules\sharp'))) {
+    # 更新後多了新套件（縮圖用的 sharp），舊的安裝補裝一次；失敗也照常啟動，只是列表用原圖
+    Write-Host '  補裝新增的套件中，請稍候…' -ForegroundColor Yellow
+    & npm --prefix web install
+}
 
 # 背景等伺服器起來，起來就自動開瀏覽器
 $opener = Start-Job -ArgumentList $Url -ScriptBlock {

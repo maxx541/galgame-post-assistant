@@ -48,6 +48,8 @@ async function existingSourceUrls(): Promise<string[]> {
   try {
     for (const p of await listPosts()) {
       if (p.sourceUrl) out.push(p.sourceUrl)
+      // 合併撰寫的貼文，補充素材的網址也算用過了
+      for (const s of p.sources) if (s.url) out.push(s.url)
     }
   } catch {
     /* 同上 */

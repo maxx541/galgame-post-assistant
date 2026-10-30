@@ -198,7 +198,7 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
     }
   })()
   if (/twitter\.com|x\.com|threads\.net|threads\.com|instagram\.com|facebook\.com/.test(host) && images.length === 0) {
-    warning = '這個平台有登入牆／反爬，通常抓不到圖。請直接拖曳或 Ctrl+V 貼上圖片。'
+    warning = '這個平台有登入牆／反爬，通常抓不到圖。到設定頁登入 X／Facebook／Instagram 可以改善，或直接拖曳、Ctrl+V 貼上圖片。'
   }
 
   // 時效分數要靠這個。三種常見寫法都試：Open Graph、schema.org、<time datetime>

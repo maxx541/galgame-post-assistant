@@ -29,8 +29,17 @@
           <label v-for="p in PLATFORMS" :key="p.key" class="chk" :class="{ on: defPlatforms.includes(p.key) }">
             <input v-model="defPlatforms" type="checkbox" :value="p.key" />{{ p.name }}
           </label>
+          <label
+            class="chk"
+            :class="{ on: mergeCollect }"
+            title="勾選後，所有連結抓到的文字與圖片都放進同一則素材"
+          >
+            <input v-model="mergeCollect" type="checkbox" />合併素材
+          </label>
           <span class="spacer grow" />
-          <span v-if="foundUrls.length" class="tiny muted">找到 {{ foundUrls.length }} 個網址</span>
+          <span v-if="foundUrls.length" class="tiny muted">
+            找到 {{ foundUrls.length }} 個網址{{ mergeCollect && foundUrls.length > 1 ? '，合併成一則' : '' }}
+          </span>
           <button class="primary" :disabled="collecting || !foundUrls.length" @click="collect">
             {{ collecting ? '抓取中…' : '抓取' }}
           </button>
@@ -121,8 +130,10 @@
             <img
               v-for="f in m.images.slice(0, 3)"
               :key="f"
-              :src="`/api/media/inbox/${encodeURIComponent(m.id)}/${f}`"
+              :src="`/api/media/inbox/${encodeURIComponent(m.id)}/${f}?w=240`"
               alt=""
+              loading="lazy"
+              decoding="async"
             />
             <div v-if="!m.images.length" class="nothumb tiny faint">無圖</div>
             <span class="viatag tiny">{{ m.via === 'playwright' ? 'X' : m.via === 'manual' ? '本地' : '網頁' }}</span>
@@ -177,6 +188,14 @@
         <button class="primary" :disabled="bulkBusy || !pickedUnwritten.length" @click="writePicked">
           AI 撰寫（{{ pickedUnwritten.length }}）
         </button>
+        <button
+          class="primary"
+          :disabled="bulkBusy || pickedUnwritten.length < 2"
+          title="勾選的素材合併寫成一篇貼文"
+          @click="openMerge"
+        >
+          合併成一篇（{{ pickedUnwritten.length }}）
+        </button>
         <button class="danger" :disabled="bulkBusy || !picked.length" @click="delPicked">
           刪除（{{ picked.length }}）
         </button>
@@ -186,6 +205,68 @@
       </div>
       <p class="tiny faint" style="margin: 6px 0 0">刪除會連圖片資料夾一起移除。</p>
       <div v-if="batchMsg" class="tiny" :class="batchErr ? 'm-err' : 'm-ok'" style="margin-top: 6px">{{ batchMsg }}</div>
+    </div>
+
+    <!-- 合併撰寫：排好主從順序再送，第一則是主素材 -->
+    <div v-if="merge.open" class="modalwrap" @click.self="closeMerge">
+      <div class="modal" role="dialog" aria-label="合併成一篇">
+        <div class="modalhead">
+          <strong class="h2">合併 {{ merge.ids.length }} 則素材成一篇</strong>
+          <span class="spacer grow" />
+          <button class="ghost sm" :disabled="merge.busy" @click="closeMerge">×</button>
+        </div>
+        <div class="modalbody stack">
+          <p class="tiny muted" style="margin: 0">
+            第一則是<b>主素材</b>，決定這篇的主軸；其餘只拿來補細節。
+            圖片每則帶前 {{ MERGE_IMAGES_PER_MATERIAL }} 張進貼文。
+          </p>
+          <ol class="mlist">
+            <li v-for="(mid, i) in merge.ids" :key="mid" class="mrow">
+              <span class="badge" :class="{ solid: i === 0 }" :style="i === 0 ? 'background: var(--accent)' : ''">
+                {{ i === 0 ? '主要' : '補充' }}
+              </span>
+              <img
+                v-if="byId(mid)?.images[0]"
+                :src="`/api/media/inbox/${encodeURIComponent(mid)}/${byId(mid)!.images[0]}?w=120`"
+                alt=""
+                class="mrow-img"
+              />
+              <span class="mrow-title small">{{ byId(mid)?.title || mid }}</span>
+              <span class="tiny faint">{{ byId(mid)?.sourceGuess }}</span>
+              <span class="spacer grow" />
+              <button class="ghost sm" :disabled="merge.busy || i === 0" title="往上" @click="moveMerge(i, -1)">↑</button>
+              <button
+                class="ghost sm"
+                :disabled="merge.busy || i === merge.ids.length - 1"
+                title="往下"
+                @click="moveMerge(i, 1)"
+              >↓</button>
+            </li>
+          </ol>
+          <div class="row wrap" style="gap: 8px">
+            <span class="tiny muted">平台</span>
+            <label v-for="p in PLATFORMS" :key="p.key" class="chk" :class="{ on: merge.platforms.includes(p.key) }">
+              <input v-model="merge.platforms" type="checkbox" :value="p.key" />{{ p.name }}
+            </label>
+          </div>
+          <div class="field">
+            <label>額外指示（選填）</label>
+            <textarea v-model="merge.extra" rows="2" placeholder="例如：以發售日為主軸，週邊資訊放後面" />
+          </div>
+          <div class="row wrap" style="gap: 8px">
+            <span v-if="merge.err" class="tiny m-err">{{ merge.err }}</span>
+            <span class="spacer grow" />
+            <select v-model.number="perPlatform" class="sm-in" style="width: 114px" :disabled="merge.busy">
+              <option :value="1">每平台 1 版</option>
+              <option :value="2">每平台 2 版</option>
+              <option :value="3">每平台 3 版</option>
+            </select>
+            <button class="primary" :disabled="merge.busy || !merge.platforms.length" @click="runMerge">
+              {{ merge.busy ? '撰寫中…' : 'AI 合併撰寫' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -208,6 +289,7 @@ const written = computed(() => items.value.filter(m => m.written))
 const mode = ref<'url' | 'manual'>('url')
 const urlText = ref('')
 const defPlatforms = ref<string[]>(['facebook'])
+const mergeCollect = ref(false)
 const collecting = ref(false)
 const collectMsg = ref('')
 const collectErr = ref(false)
@@ -326,13 +408,13 @@ async function collect() {
   collecting.value = true
   collectMsg.value = ''
   try {
-    const r = await $fetch<{ jobId: string; total: number }>('/api/inbox/collect', {
+    const r = await $fetch<{ jobId: string; total: number; merge: boolean }>('/api/inbox/collect', {
       method: 'POST',
-      body: { urls: foundUrls.value, platforms: defPlatforms.value }
+      body: { urls: foundUrls.value, platforms: defPlatforms.value, merge: mergeCollect.value }
     })
     await collectJob.value?.attach(r.jobId)
     collectErr.value = false
-    collectMsg.value = `${r.total} 個連結交給背景抓，可以切去別頁。`
+    collectMsg.value = `${r.total} 個連結交給背景抓${r.merge ? '（合併成一則素材）' : ''}，可以切去別頁。`
     urlText.value = ''
   } catch (e) {
     collectErr.value = true
@@ -406,6 +488,56 @@ function pickWritten() {
   picked.value = written.value.map(m => m.id)
 }
 
+// ── 合併撰寫 ──────────────────────────────────────────────────────
+/** 與 server/utils/material.ts 的 MERGE_IMAGES_PER_MATERIAL 一致 */
+const MERGE_IMAGES_PER_MATERIAL = 3
+const merge = reactive({ open: false, busy: false, ids: [] as string[], platforms: [] as string[], extra: '', err: '' })
+const byId = (id: string) => items.value.find(m => m.id === id)
+
+function openMerge() {
+  const ms = pickedUnwritten.value
+  if (ms.length < 2) return
+  // 照勾選的先後排，先勾的當主素材
+  merge.ids = picked.value.filter(id => ms.some(m => m.id === id))
+  merge.platforms = [...new Set(ms.flatMap(m => m.platforms))]
+  merge.extra = ''
+  merge.err = ''
+  merge.open = true
+}
+function closeMerge() {
+  if (!merge.busy) merge.open = false
+}
+function moveMerge(i: number, d: number) {
+  const ids = [...merge.ids]
+  ;[ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]
+  merge.ids = ids
+}
+
+/** 合併是一次模型呼叫，跟單則撰寫一樣直接等結果，寫好就跳到貼文 */
+async function runMerge() {
+  merge.busy = true
+  merge.err = ''
+  try {
+    const r = await $fetch<{ postId: string; created: number }>('/api/generate', {
+      method: 'POST',
+      body: {
+        materialIds: merge.ids,
+        perPlatform: perPlatform.value,
+        platforms: merge.platforms,
+        extra: merge.extra.trim()
+      }
+    })
+    toast(`合併 ${merge.ids.length} 則，寫好 ${r.created} 個版本`)
+    picked.value = picked.value.filter(id => !merge.ids.includes(id))
+    merge.open = false
+    await navigateTo(`/posts/${encodeURIComponent(r.postId)}`)
+  } catch (e) {
+    merge.err = errMsg(e)
+  } finally {
+    merge.busy = false
+  }
+}
+
 async function onWriteDone(j: { status: string; done: number; total: number }) {
   await refresh()
   if (j.status === 'done') toast(`批次撰寫完成，${j.done} / ${j.total} 則`)
@@ -413,8 +545,10 @@ async function onWriteDone(j: { status: string; done: number; total: number }) {
 
 async function onCollectDone(j: { status: string; result: unknown }) {
   await refresh()
-  const r = (j.result || {}) as { added?: number; failed?: number }
-  if (j.status === 'done') toast(`抓到 ${r.added || 0} 則${r.failed ? `，${r.failed} 則失敗` : ''}`)
+  const r = (j.result || {}) as { added?: number; failed?: number; merged?: boolean }
+  if (j.status !== 'done') return
+  if (r.merged) toast(`已合併成一則素材${r.failed ? `，${r.failed} 個連結失敗` : ''}`)
+  else toast(`抓到 ${r.added || 0} 則${r.failed ? `，${r.failed} 則失敗` : ''}`)
 }
 
 /** 批量刪除。連資料夾帶圖片一起清掉，不留空殼 */
@@ -544,4 +678,25 @@ async function del(m: Material) {
 }
 .sm-link { font-size: 13px; }
 .quickbar { position: sticky; bottom: 14px; margin-top: 16px; padding: 10px 13px; z-index: 5; }
+
+.modalwrap {
+  position: fixed; inset: 0; z-index: 50; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.modal {
+  display: flex; flex-direction: column; width: min(640px, 100%); max-height: 88vh;
+  background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+}
+.modalhead { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.modalbody { padding: 14px; overflow-y: auto; }
+.mlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mrow {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
+}
+.mrow-img { width: 40px; height: 40px; object-fit: cover; border-radius: 5px; flex: none; }
+.mrow-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field > textarea { width: 100%; }
 </style>

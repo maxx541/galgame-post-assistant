@@ -58,7 +58,7 @@
           </div>
           <div v-if="m.images.length" class="imgs">
             <div v-for="f in m.images" :key="f" class="imgcell">
-              <img :src="`/api/media/inbox/${eid}/${f}`" :alt="f" />
+              <img :src="`/api/media/inbox/${eid}/${f}?w=240`" :alt="f" loading="lazy" decoding="async" />
               <button class="del" title="刪除" @click="delImage(f)">×</button>
             </div>
           </div>

@@ -434,8 +434,14 @@ def build_post(pid):
     else:
         foot_tail = ' · 尚未發佈'
 
-    sub = (f'來源：{esc(post.get("sourceName") or "—")}　·　'
-           f'{esc(post.get("category"))}／{esc(post.get("postType"))}')
+    # 合併撰寫的貼文有多則來源，逐一列出；舊資料沒有 sources 就用 sourceName
+    sources = post.get('sources') or []
+    if len(sources) > 1:
+        names = [s.get('sourceName') or s.get('title') or '本地素材' for s in sources]
+        src = f'{esc("、".join(names))}（合併 {len(sources)} 則）'
+    else:
+        src = esc(post.get('sourceName') or '—')
+    sub = f'來源：{src}　·　{esc(post.get("category"))}／{esc(post.get("postType"))}'
 
     return render(
         title=post.get('title') or pid,

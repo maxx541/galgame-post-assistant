@@ -33,7 +33,7 @@ AI 撰寫 ── 依規範判斷體裁、寫出多個語氣版本
 | | 版本 | 用途 |
 |---|---|---|
 | Node.js | 20 以上 | 主程式 |
-| Python | 3.10 以上 | 只有讀推特要用（Playwright） |
+| Python | 3.10 以上 | 只有讀推特／FB／IG 要用（Playwright） |
 
 AI 撰寫需要一組 **OpenAI 相容的 Chat Completions** 端點與金鑰。預設指向 Google Gemini 的相容端點，換成 OpenRouter、本機 gateway 或別家都可以，只要改設定。
 
@@ -52,7 +52,7 @@ npm run dev             # http://localhost:4321
 
 根目錄的 `package.json` 只是轉發指令，真正的 Nuxt 專案在 `web/`，兩邊執行都可以。
 
-打開之後到**設定**頁填 API 金鑰，就能用了。其餘（推特、Facebook、Notion、新聞網站）都是可選的，用到哪個接哪個。
+打開之後到**設定**頁填 API 金鑰，就能用了。其餘（推特、Facebook／Instagram、Notion、新聞網站）都是可選的，用到哪個接哪個。
 
 ---
 
@@ -83,6 +83,8 @@ npm run dev             # http://localhost:4321
 一次可以貼多個連結。抓取跑在伺服器的背景工作上，切到別頁、關掉分頁都不影響，回來進度還在。
 
 底部有統一的批量列：全選、AI 撰寫、批量刪除、清掉已撰寫的。刪除會連圖片資料夾一起移除。
+
+**合併成一篇**：勾兩則以上未撰寫的素材，可以合寫成一篇貼文。第一則是主素材，決定主軸，其餘只補細節，順序可以在對話框裡調。每則素材只帶前 3 張圖，一則素材只能屬於一篇貼文。
 
 ### 貼文
 
@@ -163,16 +165,26 @@ frontmatter（版本 id、平台、AI 的撰寫理由）不碰，而且會先比
 
 設定頁填 **Base URL、API 金鑰、模型名稱**。也可以改用環境變數：把 `web/.env.example` 複製成 `web/.env`，填 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，環境變數優先。
 
-### 推特讀取
+### 推特／Facebook／Instagram 讀取
 
-X 對未登入的請求幾乎全擋，所以走 Playwright + 瀏覽器憑證重用。先裝：
+這三個平台對未登入的請求擋得很兇，所以走 Playwright + 瀏覽器憑證重用。先裝：
 
 ```bash
 py -m pip install playwright
 py -m playwright install chromium
 ```
 
-然後在設定頁按「登入 X」，會開一個 Chromium 讓你登入，登入狀態存在 `data/.browser/x`，之後每次抓取都重用。
+然後在設定頁登入：
+
+| 平台 | 按鈕 | 登入狀態存在 |
+|---|---|---|
+| X | 「登入 X」 | `data/.browser/x` |
+| Facebook／Instagram | 「登入 Facebook」「登入 Instagram」 | `data/.browser/meta`（兩邊共用一份 profile） |
+
+之後在素材夾貼上這些網址，就會自動走已登入的瀏覽器去讀內文、發文時間與圖片。
+
+FB／IG 沒登入也抓得到公開貼文的摘要（走 og: 標籤，IG 另外退到官方 embed 頁），
+但內文可能被截斷、輪播只拿得到主圖，而且 Facebook 的單篇貼文連結多半直接是登入牆——要完整內容就先登入。
 
 ### Facebook / Instagram / Threads
 
@@ -250,6 +262,7 @@ npm run build
 貼文自動平台.bat      Windows 啟動器（純 ASCII，邏輯在 tools/start.ps1）
 tools/
   x_scraper.py        Playwright 推特抓取
+  social_scraper.py   Playwright Facebook／Instagram 抓取
   preview.py          把貼文／素材算成一頁 HTML 預覽
   apply_edits.py      把預覽頁上的修改寫回本機
   start.ps1           啟動邏輯

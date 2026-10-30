@@ -3,10 +3,10 @@ export default defineEventHandler(async event => {
   const url = (body?.url || '').trim()
   if (!/^https?:\/\//i.test(url)) throw createError({ statusCode: 400, message: '請提供 http(s) 網址' })
 
-  // X／Twitter 走 Playwright + 已登入的瀏覽器 profile，一般 fetch 會被擋
-  if (isXUrl(url)) {
+  // X／Facebook／Instagram 走 Playwright + 已登入的瀏覽器 profile，一般 fetch 會被擋
+  if (isXUrl(url) || isSocialUrl(url)) {
     try {
-      return toScrapeResult(await xScrape(url))
+      return isXUrl(url) ? toScrapeResult(await xScrape(url)) : toScrapeResultSocial(await socialScrape(url))
     } catch (e) {
       const why = (e as { message?: string }).message || String(e)
       try {

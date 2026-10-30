@@ -42,19 +42,3 @@ export default defineEventHandler(async event => {
   return { deleted, bytes, failed, requested: targets.length }
 })
 
-/** 算資料夾佔多少空間，好在刪完之後告訴使用者省了多少 */
-async function dirSize(dir: string): Promise<number> {
-  let total = 0
-  for (const e of await fs.readdir(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name)
-    if (e.isDirectory()) total += await dirSize(p)
-    else {
-      try {
-        total += (await fs.stat(p)).size
-      } catch {
-        /* 讀不到就當 0 */
-      }
-    }
-  }
-  return total
-}

@@ -1,4 +1,4 @@
-# 推特讀取用。安裝：
+# 推特與 Facebook／Instagram 讀取用。安裝：
 #   py -m pip install -r tools/requirements.txt
 #   py -m playwright install chromium
 playwright>=1.40

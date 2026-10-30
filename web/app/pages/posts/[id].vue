@@ -38,7 +38,7 @@
               @drop.prevent="onDrop(i)"
               @dragend="dragFrom = -1; dragOver = -1"
             >
-              <img :src="`/api/media/posts/${eid}/${img.file}`" :alt="img.file" draggable="false" />
+              <img :src="`/api/media/posts/${eid}/${img.file}?w=240`" :alt="img.file" draggable="false" loading="lazy" decoding="async" />
               <span v-if="img.selected" class="ord">{{ publishIndex(i) }}</span>
               <span v-else class="ord skip">略</span>
               <label class="pick" :title="img.selected ? '發佈時會帶上' : '發佈時會跳過'">
@@ -291,7 +291,17 @@
             </div>
             <div class="kv"><span>子型</span><b>{{ post.postType }}</b></div>
             <div class="kv"><span>來源</span><b>{{ post.sourceName || '—' }}</b></div>
-            <div v-if="post.sourceUrl" class="kv">
+            <div v-if="merged" class="kv top">
+              <span>原文</span>
+              <ol class="srclist tiny">
+                <li v-for="(s, i) in post.sources" :key="s.materialId || i">
+                  <span class="faint">{{ i === 0 ? '主要' : '補充' }}</span>
+                  <a v-if="s.url" :href="s.url" target="_blank">{{ s.title || s.sourceName || s.url }} ↗</a>
+                  <span v-else>{{ s.title || s.sourceName || '本地素材' }}</span>
+                </li>
+              </ol>
+            </div>
+            <div v-else-if="post.sourceUrl" class="kv">
               <span>原文</span><a :href="post.sourceUrl" target="_blank" class="tiny">開啟 ↗</a>
             </div>
             <div class="kv"><span>狀態</span>
@@ -305,7 +315,15 @@
             </div>
             <div class="field">
               <label>素材原文（撰寫時的依據，唯讀參考）</label>
-              <pre class="rawnote tiny">{{ post.note || '（無）' }}</pre>
+              <template v-if="merged">
+                <details v-for="(s, i) in post.sources" :key="s.materialId || i" class="srcnote" :open="i === 0">
+                  <summary class="tiny">
+                    素材 {{ i + 1 }}{{ i === 0 ? '・主要' : '' }}：{{ s.title || s.sourceName || '（沒有標題）' }}
+                  </summary>
+                  <pre class="rawnote tiny">{{ s.text || '（無）' }}</pre>
+                </details>
+              </template>
+              <pre v-else class="rawnote tiny">{{ post.note || '（無）' }}</pre>
             </div>
             <div class="row wrap" style="gap: 6px">
               <select v-model="pubPlatform" class="sm-in" style="width: 118px">
@@ -348,8 +366,10 @@
 <script setup lang="ts">
 interface Img { file: string; artist: string; alt: string; sourceUrl: string; selected: boolean }
 interface Variant { id: string; label: string; platform: string; locked: boolean; note: string; body: string }
+interface PostSource { materialId: string; title: string; url: string; sourceName: string; text: string }
 interface Post {
   id: string; title: string; category: string; postType: string; sourceName: string; sourceUrl: string
+  sources?: PostSource[]
   platforms: string[]; status: string; missing: string[]; links: { label: string; url: string }[]
   note: string; images: Img[]; publishRecords: { platform: string; at: string; url: string }[]
   variants: Variant[]; createdAt: string; updatedAt: string
@@ -362,6 +382,8 @@ const { toast, toastErr } = useToast()
 
 const { data, refresh } = await useFetch<Post>(`/api/posts/${eid}`)
 const post = ref<Post | null>(data.value ? JSON.parse(JSON.stringify(data.value)) : null)
+/** 多則素材合併寫成的貼文，來源與原文要逐則列 */
+const merged = computed(() => (post.value?.sources?.length || 0) > 1)
 const { data: originData } = await useFetch<Record<string, string>>(`/api/posts/${eid}/origin`, {
   default: () => ({})
 })
@@ -653,7 +675,7 @@ const categoryOptions = computed(() => {
   return [...new Set([...CATEGORIES, ...(cur ? [cur] : [])])]
 })
 const selectedImages = computed(() =>
-  (post.value?.images || []).filter(i => i.selected).map(i => `/api/media/posts/${eid}/${i.file}`)
+  (post.value?.images || []).filter(i => i.selected).map(i => `/api/media/posts/${eid}/${i.file}?w=800`)
 )
 const artists = computed(() =>
   [...new Set((post.value?.images || []).map(i => i.artist.trim()).filter(Boolean))]
@@ -1024,6 +1046,12 @@ async function removePost() {
 }
 .kv { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .kv > span:first-child { color: var(--muted); width: 44px; flex: none; }
+.kv.top { align-items: flex-start; }
+.srclist { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.srclist li { word-break: break-all; }
+.srclist .faint { margin-right: 4px; }
+.srcnote + .srcnote { margin-top: 6px; }
+.srcnote > summary { cursor: pointer; color: var(--muted); margin-bottom: 4px; }
 .rawnote {
   margin: 0; font-family: inherit; white-space: pre-wrap; word-break: break-word;
   background: var(--panel-2); border-radius: 7px; padding: 9px 11px;

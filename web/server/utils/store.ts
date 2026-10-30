@@ -30,6 +30,17 @@ export interface PublishRecord {
   commentDone?: boolean
 }
 
+/** 貼文引用的一則素材。原文與出處在撰寫當下存一份快照，素材刪掉也不影響 */
+export interface PostSource {
+  materialId: string
+  title: string
+  url: string
+  sourceName: string
+  author: string
+  postedAt: string
+  text: string
+}
+
 export interface PostMeta {
   id: string
   title: string
@@ -37,6 +48,11 @@ export interface PostMeta {
   postType: string
   sourceName: string
   sourceUrl: string
+  /**
+   * 撰寫時用到的素材，第一則是主素材。合併撰寫時會有多則；
+   * sourceName／sourceUrl／note 仍保留（取主素材與全部原文），舊資料和 preview.py 照樣讀得懂。
+   */
+  sources: PostSource[]
   platforms: string[]
   status: string
   missing: string[]
@@ -179,6 +195,7 @@ export function emptyMeta(id: string, title: string): PostMeta {
     postType: '推坑・安利',
     sourceName: '',
     sourceUrl: '',
+    sources: [],
     platforms: ['facebook'],
     status: 'draft',
     missing: [],
@@ -237,6 +254,7 @@ export async function loadPost(id: string): Promise<Post | null> {
   if (!(await exists(join(dir, 'post.json')))) return null
   const meta = await readJson<PostMeta>(join(dir, 'post.json'), emptyMeta(id, id))
   meta.id = id
+  if (!Array.isArray(meta.sources)) meta.sources = []
   const variants: Variant[] = []
   const vdir = join(dir, 'variants')
   if (await exists(vdir)) {

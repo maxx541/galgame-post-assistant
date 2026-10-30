@@ -14,7 +14,7 @@
     <div v-if="tail" class="tiny more">— {{ p.cutoffLabel }}（{{ p.cutoff }} 字元）之後會被摺疊 —</div>
 
     <div v-if="images.length" class="imgs" :class="'n' + Math.min(images.length, 4)">
-      <img v-for="(src, i) in images.slice(0, 4)" :key="i" :src="src" alt="" />
+      <img v-for="(src, i) in images.slice(0, 4)" :key="i" :src="src" alt="" loading="lazy" decoding="async" />
     </div>
 
     <div v-if="comment" class="comment">

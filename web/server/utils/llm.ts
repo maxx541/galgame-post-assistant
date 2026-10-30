@@ -142,7 +142,25 @@ export interface GenerateInput {
   memory: string
   perPlatform: number
   images: { media_type: string; data: string }[]
+  /**
+   * 合併撰寫：兩則以上素材寫成一篇，第一則是主素材。
+   * 有給（且超過一則）時會取代 text／sourceName／sourceUrl，逐則包成 <素材 N> 送出。
+   */
+  sources?: MergeSource[]
 }
+
+export interface MergeSource {
+  title: string
+  url: string
+  sourceName: string
+  author: string
+  postedAt: string
+  text: string
+}
+
+/** 合併撰寫時每則原文的字數上限。主素材給多一點，補充素材只是補細節 */
+const MERGE_MAIN_CHARS = 8000
+const MERGE_EXTRA_CHARS = 4000
 
 /**
  * 各平台的硬性數字。規範第四、五節有表格，但只靠表格模型會抓不準，
@@ -230,11 +248,37 @@ ${spec}
     note 則是一句話說明這個版本跟其他版本差在哪。label 和 note 都不會寫進文案。${memory || ''}`
 }
 
+/** 合併撰寫的素材區塊：每則各自包一段，交代主從與衝突的處理方式 */
+function mergeSourceLines(sources: MergeSource[]): string[] {
+  const lines: string[] = [
+    `這次有 ${sources.length} 則素材，要合併寫成「一篇」貼文：`,
+    '・素材 1 是主素材，決定這篇的主軸；其餘是補充，只拿來補細節、交叉確認。',
+    '・不要寫成逐條的新聞摘要，也不要每則素材各寫一段。',
+    '・素材之間說法有出入（日期、價格、數量、名稱…）時不要自己挑一個，把衝突寫進 missing。',
+    '・各則的網址僅供你理解素材，絕對不要寫進正文。'
+  ]
+  sources.forEach((s, i) => {
+    const n = i + 1
+    const cap = i === 0 ? MERGE_MAIN_CHARS : MERGE_EXTRA_CHARS
+    const body = s.text.trim()
+    const text = [...body].length > cap ? cut(body, cap) + '…（以下略）' : body
+    lines.push('', `<素材 ${n}${i === 0 ? ' 主要' : ' 補充'}>`)
+    if (s.title) lines.push(`標題：${s.title}`)
+    if (s.sourceName) lines.push(`來源：${s.sourceName}`)
+    if (s.author && s.author !== s.sourceName) lines.push(`作者：${s.author}`)
+    if (s.postedAt) lines.push(`發佈時間：${s.postedAt}`)
+    if (s.url) lines.push(`網址：${s.url}`)
+    lines.push('原文（原封不動，未經整理）：', text || '（沒有內文，請看圖）', `</素材 ${n}>`)
+  })
+  return lines
+}
+
 export function buildUserText(input: GenerateInput): string {
   const lines: string[] = ['【素材】']
+  const merged = (input.sources?.length || 0) > 1
   if (input.title) lines.push(`暫定標題（僅供參考，你可以自己重下）：${input.title}`)
-  if (input.sourceName) lines.push(`來源：${input.sourceName}`)
-  if (input.sourceUrl) lines.push(`來源網址（僅供你理解素材，絕對不要寫進正文）：${input.sourceUrl}`)
+  if (!merged && input.sourceName) lines.push(`來源：${input.sourceName}`)
+  if (!merged && input.sourceUrl) lines.push(`來源網址（僅供你理解素材，絕對不要寫進正文）：${input.sourceUrl}`)
   if (input.artists.length) lines.push(`插圖繪師：${input.artists.join(' ')}（要寫成（繪師：…）一行）`)
   if (input.links.length) {
     lines.push(
@@ -242,7 +286,9 @@ export function buildUserText(input: GenerateInput): string {
     )
   }
   if (input.images.length) lines.push(`附上 ${Math.min(input.images.length, MAX_IMAGES)} 張素材圖，請看圖判斷內容`)
-  if (input.text.trim()) {
+  if (merged) {
+    lines.push('', ...mergeSourceLines(input.sources!))
+  } else if (input.text.trim()) {
     lines.push('', '素材原文（原封不動，未經整理）：', '<素材原文>', input.text.trim(), '</素材原文>')
   }
   if (input.extra.trim()) lines.push('', '這次的額外指示：', input.extra.trim())
@@ -312,7 +358,7 @@ const mb = (n: number) => (n / 1_000_000).toFixed(1) + 'MB'
  * 純函式，不碰檔案系統，測得到。
  */
 export function pickImagesWithinBudget(
-  files: { name: string; size: number }[],
+  files: { name: string; size: number; lead?: boolean }[],
   limits = { count: MAX_IMAGES, perFile: MAX_IMAGE_BYTES, total: MAX_TOTAL_IMAGE_BYTES }
 ): { names: string[]; skipped: string[] } {
   const skipped: string[] = []
@@ -329,8 +375,12 @@ export function pickImagesWithinBudget(
     used += f.size
   }
 
-  const [first, ...others] = fit
-  if (first) take(first)
+  // 合併撰寫時每則素材的第一張都標了 lead，依序先放；單則素材就是第一張
+  const leads = fit.some(f => f.lead) ? fit.filter(f => f.lead) : fit.slice(0, 1)
+  leads.forEach((f, i) => {
+    if (i === 0 || (chosen.length < limits.count && used + f.size <= limits.total)) take(f)
+  })
+  const others = fit.filter(f => !chosen.includes(f.name))
   // 小的先進，同樣的預算能多看幾張
   for (const f of [...others].sort((a, b) => a.size - b.size)) {
     if (chosen.length >= limits.count || used + f.size > limits.total) continue
@@ -344,30 +394,40 @@ export function pickImagesWithinBudget(
 }
 
 export async function loadImages(dir: string, files: string[]) {
+  return loadImagesFrom(files.map(f => ({ path: join(dir, f), name: f })))
+}
+
+/**
+ * 跨資料夾挑圖，合併撰寫用。name 是給人看的（也用來辨識），多個資料夾時要自己保證不重複；
+ * lead 標記「一定先放」的圖，也就是每則素材的主視覺。
+ */
+export async function loadImagesFrom(files: { path: string; name: string; lead?: boolean }[]) {
   const out: { media_type: string; data: string }[] = []
   const skipped: string[] = []
-  const sized: { name: string; size: number }[] = []
+  const sized: { name: string; size: number; lead?: boolean }[] = []
+  const pathOf = new Map(files.map(f => [f.name, f.path]))
 
   for (const f of files) {
-    if (!IMAGE_MIME[extname(f).toLowerCase()]) {
-      skipped.push(`${f}（格式不支援）`)
+    if (!IMAGE_MIME[extname(f.path).toLowerCase()]) {
+      skipped.push(`${f.name}（格式不支援）`)
       continue
     }
     try {
-      sized.push({ name: f, size: (await fs.stat(join(dir, f))).size })
+      sized.push({ name: f.name, size: (await fs.stat(f.path)).size, lead: f.lead })
     } catch {
-      skipped.push(`${f}（讀不到）`)
+      skipped.push(`${f.name}（讀不到）`)
     }
   }
 
   const picked = pickImagesWithinBudget(sized)
   skipped.push(...picked.skipped)
-  for (const f of picked.names) {
+  for (const name of picked.names) {
+    const p = pathOf.get(name)!
     try {
-      const buf = await fs.readFile(join(dir, f))
-      out.push({ media_type: IMAGE_MIME[extname(f).toLowerCase()]!, data: buf.toString('base64') })
+      const buf = await fs.readFile(p)
+      out.push({ media_type: IMAGE_MIME[extname(p).toLowerCase()]!, data: buf.toString('base64') })
     } catch {
-      skipped.push(`${f}（讀不到）`)
+      skipped.push(`${name}（讀不到）`)
     }
   }
   return { images: out, skipped }

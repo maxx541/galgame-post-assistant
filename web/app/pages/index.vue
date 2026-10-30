@@ -13,6 +13,9 @@
         <option value="">全部類型</option>
         <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
       </select>
+      <button v-if="posts.length" :class="selecting ? 'primary' : 'ghost'" @click="toggleSelecting">
+        {{ selecting ? '完成' : '選取' }}
+      </button>
       <NuxtLink to="/inbox" class="btnlink primary">去素材夾寫新的</NuxtLink>
     </div>
 
@@ -24,9 +27,18 @@
     </div>
 
     <div class="grid">
-      <NuxtLink v-for="p in filtered" :key="p.id" class="pcard card" :to="`/posts/${encodeURIComponent(p.id)}`">
+      <component
+        :is="selecting ? 'div' : NuxtLink"
+        v-for="p in filtered"
+        :key="p.id"
+        class="pcard card"
+        :class="{ selecting, sel: picked.includes(p.id) }"
+        :to="selecting ? undefined : `/posts/${encodeURIComponent(p.id)}`"
+        @click="selecting && togglePick(p.id)"
+      >
         <div class="thumb">
-          <img v-if="cover(p)" :src="cover(p)!" alt="" />
+          <span v-if="selecting" class="pickmark" :class="{ on: picked.includes(p.id) }">✓</span>
+          <img v-if="cover(p)" :src="cover(p)!" alt="" loading="lazy" decoding="async" />
           <div v-else class="nothumb tiny faint">無圖</div>
           <span v-if="p.images.length > 1" class="imgcount tiny">{{ p.images.length }} 圖</span>
         </div>
@@ -50,7 +62,25 @@
             <span class="faint">{{ shortDate(p.updatedAt) }}</span>
           </div>
         </div>
-      </NuxtLink>
+      </component>
+    </div>
+
+    <div v-if="selecting" class="quickbar card">
+      <div class="row wrap" style="gap: 8px">
+        <label class="chk" :class="{ on: allPicked }">
+          <input type="checkbox" :checked="allPicked" :disabled="!filtered.length" @change="toggleAll" />
+          全選目前列出的（{{ filtered.length }}）
+        </label>
+        <button v-if="picked.length" class="ghost sm" @click="picked = []">取消選取</button>
+        <span class="small muted">已選 {{ picked.length }} 則</span>
+        <span class="spacer grow" />
+        <button class="danger" :disabled="deleting || !picked.length" @click="delPicked">
+          {{ deleting ? '刪除中…' : `刪除（${picked.length}）` }}
+        </button>
+      </div>
+      <p class="tiny faint" style="margin: 6px 0 0">
+        刪除會連圖片資料夾一起移除，對應的素材改回未撰寫，還沒發的本機排程會取消。
+      </p>
     </div>
   </div>
 </template>
@@ -64,7 +94,9 @@ interface Post {
   images: Img[]; variants: Variant[]; updatedAt: string
 }
 
-const { data } = await useFetch<Post[]>('/api/posts', { default: () => [] })
+const NuxtLink = resolveComponent('NuxtLink')
+const { toast, toastErr } = useToast()
+const { data, refresh } = await useFetch<Post[]>('/api/posts', { default: () => [] })
 const posts = computed(() => data.value || [])
 
 const q = ref('')
@@ -92,9 +124,53 @@ const filtered = computed(() =>
   })
 )
 
+const selecting = ref(false)
+const picked = ref<string[]>([])
+const deleting = ref(false)
+
+const allPicked = computed(() => filtered.value.length > 0 && filtered.value.every(p => picked.value.includes(p.id)))
+
+function toggleSelecting() {
+  selecting.value = !selecting.value
+  picked.value = []
+}
+function togglePick(id: string) {
+  picked.value = picked.value.includes(id) ? picked.value.filter(x => x !== id) : [...picked.value, id]
+}
+function toggleAll() {
+  const ids = filtered.value.map(p => p.id)
+  picked.value = allPicked.value
+    ? picked.value.filter(id => !ids.includes(id))
+    : [...new Set([...picked.value, ...ids])]
+}
+
+async function delPicked() {
+  const ids = picked.value
+  if (!ids.length) return
+  const names = posts.value.filter(p => ids.includes(p.id)).map(p => `・${p.title}`)
+  const list = names.slice(0, 8).join('\n') + (names.length > 8 ? `\n…還有 ${names.length - 8} 則` : '')
+  if (!confirm(`刪除這 ${ids.length} 則貼文？資料夾與圖片會一併刪除，無法復原。\n\n${list}`)) return
+  deleting.value = true
+  try {
+    const r = await $fetch<{ deleted: number; failed: { message: string }[] }>('/api/posts/bulk-delete', {
+      method: 'POST',
+      body: { ids }
+    })
+    picked.value = []
+    await refresh()
+    if (r.failed.length) toastErr(`刪掉 ${r.deleted} 則，${r.failed.length} 則失敗：${r.failed[0]?.message}`)
+    else toast(`已刪除 ${r.deleted} 則貼文`)
+    if (!posts.value.length) selecting.value = false
+  } catch (e) {
+    toastErr((e as { data?: { message?: string } }).data?.message || String(e))
+  } finally {
+    deleting.value = false
+  }
+}
+
 function cover(p: Post) {
   const img = p.images.find(i => i.selected) || p.images[0]
-  return img ? `/api/media/posts/${encodeURIComponent(p.id)}/${img.file}` : null
+  return img ? `/api/media/posts/${encodeURIComponent(p.id)}/${img.file}?w=480` : null
 }
 function snippet(p: Post) {
   const v = p.variants[0]
@@ -149,6 +225,20 @@ function shortDate(iso: string) {
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden;
 }
+.pcard.selecting { cursor: pointer; user-select: none; }
+.pcard.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pickmark {
+  position: absolute; left: 8px; top: 8px; z-index: 1; width: 24px; height: 24px;
+  display: grid; place-items: center; border-radius: 50%; font-size: 14px; font-weight: 700;
+  border: 2px solid #fff; background: rgba(0, 0, 0, 0.35); color: transparent;
+}
+.pickmark.on { background: var(--accent); color: #fff; }
+.quickbar { position: sticky; bottom: 14px; margin-top: 16px; padding: 10px 13px; z-index: 5; }
+.chk {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer;
+}
+.chk.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .dot::before { content: '● '; }
 .dot.err { color: var(--err); }
 .dot.warn { color: var(--warn); }

@@ -793,7 +793,7 @@ console.log('\n### 15. 後台記錄、留言連結、啟動器')
   const mat = await fs.readFile(join(HERE, '..', 'server', 'utils', 'material.ts'), 'utf8')
   ok('素材資料結構有 links 欄位', mat.includes('links: { url: string; label: string }[]'))
   ok('留言連結取素材內容裡的連結，不是素材本身網址',
-    mat.includes('post.links = (m.links || [])') && !mat.includes("label: '素材來源'"))
+    mat.includes('for (const l of m.links || [])') && !mat.includes("label: '素材來源'"))
 
   const col = await fs.readFile(join(HERE, '..', 'server', 'api', 'inbox', 'collect.post.ts'), 'utf8')
   ok('推文的連結會展開 t.co', col.includes('expandLinks'))
@@ -2397,6 +2397,61 @@ console.log('\n### 33. 發掘頁：三欄並列＋設定彈窗')
 
   const r = await j('GET', '/api/spec')
   ok('規範讀得到，並回報空不空', r.status === 200 && 'empty' in r.data)
+}
+
+{
+  // 多則素材合併成一篇
+  const llm = await import(pathToFileURL(join(HERE, '..', 'server', 'utils', 'llm.ts')).href)
+  const base = {
+    spec: '', title: '主標題', platforms: ['facebook'], sourceName: '主來源', sourceUrl: 'https://a.example/1',
+    links: [], artists: [], extra: '', memory: '', perPlatform: 1, images: []
+  }
+  const sources = [
+    { title: '主素材標題', url: 'https://a.example/1', sourceName: '主來源', author: '', postedAt: '', text: '主素材內文' },
+    { title: '補充標題', url: 'https://b.example/2', sourceName: '@補充', author: '', postedAt: '', text: '補充內文'.repeat(2000) }
+  ]
+  const mt = llm.buildUserText({ ...base, text: '串起來的原文', sources })
+  ok('合併撰寫逐則包成素材區塊', mt.includes('<素材 1 主要>') && mt.includes('</素材 2>') && mt.includes('主素材內文'))
+  ok('合併撰寫交代要寫成一篇', mt.includes('合併寫成「一篇」') && mt.includes('衝突寫進 missing'))
+  ok('合併撰寫不再送單段素材原文', !mt.includes('<素材原文>'))
+  ok('補充素材過長會截斷', mt.includes('（以下略）'))
+  const st = llm.buildUserText({ ...base, text: '單則原文', sources: [sources[0]] })
+  ok('只有一則時照舊送素材原文', st.includes('<素材原文>') && !st.includes('<素材 1'))
+
+  const L = { count: 4, perFile: 2_500_000, total: 3_500_000 }
+  const pick = llm.pickImagesWithinBudget([
+    { name: '素材1/01.jpg', size: 900_000, lead: true },
+    { name: '素材1/02.jpg', size: 1000 },
+    { name: '素材1/03.jpg', size: 2000 },
+    { name: '素材2/01.jpg', size: 800_000, lead: true },
+    { name: '素材3/01.jpg', size: 700_000, lead: true },
+    { name: '素材3/02.jpg', size: 3000 }
+  ], L)
+  ok('合併時每則素材的主視覺都先送',
+    ['素材1/01.jpg', '素材2/01.jpg', '素材3/01.jpg'].every(n => pick.names.includes(n)) && pick.names.length === 4)
+
+  const mat = await import(pathToFileURL(join(HERE, '..', 'server', 'utils', 'material.ts')).href)
+  const joined = mat.joinSourceTexts([{ ...sources[0], materialId: 'a' }, { ...sources[1], materialId: 'b', text: '短' }])
+  ok('合併的原文會標出每則的主從', joined.includes('【素材 1・主要】主素材標題') && joined.includes('【素材 2】補充標題'))
+  ok('單則的原文就是原文本身', mat.joinSourceTexts([{ ...sources[0], materialId: 'a' }]) === '主素材內文')
+
+  const mk = t => j('POST', '/api/inbox/manual', { title: t, text: t + ' 內文', platforms: ['facebook'] })
+  const a = (await mk('自動測試-合併A')).data
+  const b = (await mk('自動測試-合併B')).data
+  const miss = await j('POST', '/api/generate', { materialIds: [a.id, '不存在的素材'] })
+  ok('合併時有素材不存在回 404', miss.status === 404, 'status=' + miss.status)
+  await j('PUT', `/api/inbox/${enc(b.id)}`, { written: true, postId: '某篇' })
+  const dup = await j('POST', '/api/generate', { materialIds: [a.id, b.id] })
+  ok('已撰寫的素材不能再合併進別篇', dup.status === 409, 'status=' + dup.status)
+  const many = await j('POST', '/api/generate', { materialIds: [1, 2, 3, 4, 5, 6, 7].map(i => 'x' + i) })
+  ok('一次合併太多則會被擋', many.status === 400, 'status=' + many.status)
+  await j('DELETE', `/api/inbox/${enc(a.id)}`)
+  await j('DELETE', `/api/inbox/${enc(b.id)}`)
+
+  const gen = await fs.readFile(join(HERE, '..', 'server', 'api', 'generate.post.ts'), 'utf8')
+  ok('重寫合併貼文時照樣逐則送', gen.includes('post.sources.length > 1 ? post.sources'))
+  const inbox = await fs.readFile(join(HERE, '..', 'app', 'pages', 'inbox', 'index.vue'), 'utf8')
+  ok('素材夾有合併成一篇', inbox.includes('合併成一篇') && inbox.includes('materialIds: merge.ids'))
 }
 
 console.log(`\n${'='.repeat(46)}\n通過 ${pass} 項，失敗 ${fail} 項`)

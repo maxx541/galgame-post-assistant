@@ -2,13 +2,17 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * 依《文案撰寫規範.md》撰寫貼文。兩種模式：
- *   { materialId } → 從素材撰寫，順便讓 AI 判斷體裁／子型／待補，然後建立貼文
- *   { postId }     → 對既有貼文重新撰寫（鎖定的版本不動）
+ * 依《文案撰寫規範.md》撰寫貼文。三種模式：
+ *   { materialId }    → 從素材撰寫，順便讓 AI 判斷體裁／子型／待補，然後建立貼文
+ *   { materialIds }   → 多則素材合併成一篇，第一則是主素材
+ *   { postId }        → 對既有貼文重新撰寫（鎖定的版本不動）
  */
+const MAX_MERGE = 6
+
 export default defineEventHandler(async event => {
   const body = await readBody<{
     materialId?: string
+    materialIds?: string[]
     postId?: string
     extra?: string
     perPlatform?: number
@@ -28,43 +32,82 @@ export default defineEventHandler(async event => {
   // 反饋優化累積的個人偏好，接在規範後面一起送出
   const memory = buildMemoryBlock(await loadRules(), await loadHistory())
 
-  // ── 從素材撰寫 ────────────────────────────────────────────────
-  if (body?.materialId) {
-    const id = safeSegment(body.materialId)
-    const m = await loadMaterial(id)
-    if (!m) throw createError({ statusCode: 404, message: '找不到這則素材' })
+  // ── 從素材撰寫（多則就是合併成一篇）──────────────────────────
+  const materialIds = [
+    ...new Set((body?.materialIds?.length ? body.materialIds : body?.materialId ? [body.materialId] : []).map(x =>
+      safeSegment(String(x))
+    ))
+  ]
+  if (materialIds.length) {
+    const merged = materialIds.length > 1
+    if (materialIds.length > MAX_MERGE) {
+      throw createError({ statusCode: 400, message: `一次最多合併 ${MAX_MERGE} 則素材` })
+    }
+    const ms: Material[] = []
+    for (const id of materialIds) {
+      const m = await loadMaterial(id)
+      if (!m) throw createError({ statusCode: 404, message: merged ? `找不到素材「${id}」` : '找不到這則素材' })
+      // 一則素材只屬於一篇貼文；單則重寫是刻意另開新貼文，合併時就不收已撰寫的
+      if (merged && m.written) {
+        throw createError({ statusCode: 409, message: `「${m.title || id}」已經撰寫過了，不能再合併進別篇` })
+      }
+      ms.push(m)
+    }
+    const main = ms[0]!
 
-    const platforms = body.platforms?.length ? body.platforms : m.platforms
-    const extra = body.extra ?? m.extra
+    const platforms = body.platforms?.length
+      ? body.platforms
+      : merged
+        ? [...new Set(ms.flatMap(m => m.platforms))]
+        : main.platforms
+    const extra = body.extra ?? (merged ? [...new Set(ms.map(m => m.extra.trim()).filter(Boolean))].join('\n') : main.extra)
+
+    // 合併時每則只送會帶進貼文的那幾張，各自的第一張當主視覺優先送
+    const imageFiles = ms.flatMap((m, i) =>
+      (merged ? m.images.slice(0, MERGE_IMAGES_PER_MATERIAL) : m.images).map((f, k) => ({
+        path: join(inboxDir(), m.id, 'images', f),
+        name: merged ? `素材${i + 1}/${f}` : f,
+        lead: merged ? k === 0 : undefined
+      }))
+    )
     const { images, skipped } = settings.sendImages
-      ? await loadImages(join(inboxDir(), id, 'images'), m.images)
+      ? await loadImagesFrom(imageFiles)
       : { images: [], skipped: [] as string[] }
 
+    const sources = ms.map(materialToSource)
     const { draft, usage, model, note } = await generateDrafts({
       spec,
-      text: m.text,
-      title: m.title,
+      text: joinSourceTexts(sources),
+      title: main.title,
       platforms,
-      sourceName: m.sourceGuess,
-      sourceUrl: m.finalUrl || m.url,
-      links: m.finalUrl || m.url ? [{ label: '素材來源', url: m.finalUrl || m.url }] : [],
+      sourceName: main.sourceGuess,
+      sourceUrl: main.finalUrl || main.url,
+      links: sources
+        .filter(s => s.url)
+        .map((s, i) => ({ label: merged ? `素材來源 ${i + 1}` : '素材來源', url: s.url })),
       artists: [],
       extra,
       memory,
       perPlatform,
-      images
+      images,
+      sources: merged ? sources : undefined
     })
 
-    logInfo('post', `撰寫素材「${m.title || id}」→ ${platforms.join('、')} 各 ${perPlatform} 版`)
-    const postId = await createPostFromMaterial({ ...m, platforms }, draft)
+    const what = merged ? `合併 ${ms.length} 則素材「${main.title || main.id}」等` : `撰寫素材「${main.title || main.id}」`
+    logInfo('post', `${what} → ${platforms.join('、')} 各 ${perPlatform} 版`)
+    const postId = await createPostFromMaterials(ms, draft, platforms)
     await writeVariants(postId, draft.variants, [])
     logOk('post', `產出貼文「${draft.title}」【${draft.category}】${draft.postType}｜${draft.variants.length} 版本｜待補 ${draft.missing.length}`)
 
-    m.written = true
-    m.postId = postId
-    m.platforms = platforms
-    m.extra = extra
-    await saveMaterial(m)
+    for (const m of ms) {
+      m.written = true
+      m.postId = postId
+      if (!merged) {
+        m.platforms = platforms
+        m.extra = extra
+      }
+      await saveMaterial(m)
+    }
 
     return { postId, post: await loadPost(postId), created: draft.variants.length, skipped, usage, model, note }
   }
@@ -92,7 +135,9 @@ export default defineEventHandler(async event => {
     extra: body?.extra || '',
     memory,
     perPlatform,
-    images
+    images,
+    // 合併撰寫的貼文重寫時，照樣逐則送，不然模型只看得到串在一起的一大段
+    sources: post.sources.length > 1 ? post.sources : undefined
   })
 
   const locked = post.variants.filter(v => v.locked)

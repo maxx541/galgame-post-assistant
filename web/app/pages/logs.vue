@@ -72,6 +72,7 @@ const KIND_LABEL: Record<string, string> = {
   post: '貼文撰寫',
   feedback: '反饋優化',
   spec: '規範',
+  cleanup: '定期清理',
   system: '系統'
 }
 const kindLabel = (k: string) => KIND_LABEL[k] || k

@@ -45,8 +45,12 @@ export function isXUrl(url: string): boolean {
   }
 }
 
+export function toolPath(file: string): string {
+  return resolve(process.cwd(), '..', 'tools', file)
+}
+
 export function scriptPath(): string {
-  return resolve(process.cwd(), '..', 'tools', 'x_scraper.py')
+  return toolPath('x_scraper.py')
 }
 
 /** Windows 上優先用 py launcher，其餘平台用 python3／python */
@@ -57,15 +61,18 @@ let cachedPython: string | null = null
 /**
  * 同一份 user_data_dir 不能被兩個 Chromium 同時開啟，
  * 否則第二個會拿到半殘的 session（實測會卡在 loading spinner）。
- * 所有腳本呼叫都排隊，一次只跑一個。
+ * 每支腳本各有一條佇列（profile 不同，彼此不衝突），同一支一次只跑一個。
  */
-let queue: Promise<unknown> = Promise.resolve()
+const queues = new Map<string, Promise<unknown>>()
 
-function serialize<T>(fn: () => Promise<T>): Promise<T> {
-  const next = queue.then(fn, fn)
-  queue = next.then(
-    () => undefined,
-    () => undefined
+function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const next = (queues.get(key) || Promise.resolve()).then(fn, fn)
+  queues.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined
+    )
   )
   return next
 }
@@ -121,7 +128,16 @@ function parseOut(stdout: string, stderr: string, code: number) {
   }
 }
 
-async function callScript(args: string[], timeout: number, signal?: AbortSignal) {
+/**
+ * 跑 tools/ 底下的某支 Playwright 腳本並解析它印出的單行 JSON。
+ * x 與 Facebook／Instagram 兩支腳本共用這裡的 Python 偵測、佇列與錯誤處理。
+ */
+export async function callPythonScript(
+  file: string,
+  args: string[],
+  timeout: number,
+  signal?: AbortSignal
+): Promise<Record<string, unknown>> {
   const py = await findPython()
   if (!py) {
     throw createError({
@@ -129,15 +145,23 @@ async function callScript(args: string[], timeout: number, signal?: AbortSignal)
       message: '找不到 Python。安裝 Python 3.10 以上，再執行：py -m pip install playwright、py -m playwright install chromium'
     })
   }
-  const sp = scriptPath()
+  const sp = toolPath(file)
   if (!(await exists(sp))) {
-    throw createError({ statusCode: 500, message: '找不到 tools/x_scraper.py：' + sp })
+    throw createError({ statusCode: 500, message: `找不到 tools/${file}：` + sp })
   }
   if (signal?.aborted) throw createError({ statusCode: 499, message: '已停止' })
-  const r = await serialize(() => run(py, [sp, ...args], timeout, signal))
+  const r = await serialize(file, () => run(py, [sp, ...args], timeout, signal))
   if (signal?.aborted) throw createError({ statusCode: 499, message: '已停止' })
-  const data = parseOut(r.stdout, r.stderr, r.code)
-  return data as XResult & { ready?: boolean; downloaded?: string[]; failed?: { url: string; reason: string }[] }
+  return parseOut(r.stdout, r.stderr, r.code)
+}
+
+async function callScript(args: string[], timeout: number, signal?: AbortSignal) {
+  const data = await callPythonScript('x_scraper.py', args, timeout, signal)
+  return data as unknown as XResult & {
+    ready?: boolean
+    downloaded?: string[]
+    failed?: { url: string; reason: string }[]
+  }
 }
 
 export function profileDir() {

@@ -142,6 +142,53 @@
 
     <section class="card pad stack" style="margin-bottom: 18px">
       <div class="row">
+        <strong class="h2">Facebook／Instagram 讀取</strong>
+        <span class="spacer grow" />
+        <span v-if="sc?.loggedIn?.fb" class="badge solid" style="background: var(--ok)">FB 已登入</span>
+        <span v-else class="badge solid" style="background: var(--warn)">FB 未登入</span>
+        <span v-if="sc?.loggedIn?.ig" class="badge solid" style="background: var(--ok)">IG 已登入</span>
+        <span v-else class="badge solid" style="background: var(--warn)">IG 未登入</span>
+      </div>
+      <p class="small muted" style="margin: 0">
+        跟推特同一個路數：貼上 Facebook 或 Instagram 貼文網址時走
+        <strong>Playwright（Python）+ 瀏覽器憑證重用</strong>。兩邊是同一個 Meta 帳號體系，
+        共用 <code class="mono">data/.browser/meta</code> 一份 profile，各自登入一次即可。
+        沒登入也抓得到公開貼文的摘要，但內文會被截斷、輪播圖只拿得到第一張。
+      </p>
+
+      <ul class="small" style="margin: 0; padding-left: 20px">
+        <li :class="sc?.python ? 'ok-li' : 'bad-li'">Python：{{ sc?.python || '找不到' }}</li>
+        <li :class="sc?.scriptFound ? 'ok-li' : 'bad-li'">
+          tools/social_scraper.py：{{ sc?.scriptFound ? '找到了' : '找不到' }}
+        </li>
+        <li :class="sc?.loggedIn?.fb ? 'ok-li' : 'warn-li'">
+          Facebook：{{ sc?.loggedIn?.fb ? '已登入' : '尚未登入' }}
+        </li>
+        <li :class="sc?.loggedIn?.ig ? 'ok-li' : 'warn-li'">
+          Instagram：{{ sc?.loggedIn?.ig ? '已登入' : '尚未登入' }}
+          <span v-if="sc?.checkedAt" class="faint">（最後確認 {{ new Date(sc.checkedAt).toLocaleString('zh-TW') }}）</span>
+        </li>
+      </ul>
+
+      <div class="row wrap" style="gap: 8px">
+        <button class="primary" :disabled="scBusy || !sc?.python || !sc?.scriptFound" @click="socialLoginNow('fb')">
+          {{ scBusy === 'fb' ? '等待登入中…（瀏覽器視窗）' : sc?.loggedIn?.fb ? '重新登入 Facebook' : '開啟瀏覽器登入 Facebook' }}
+        </button>
+        <button :disabled="scBusy || !sc?.python || !sc?.scriptFound" @click="socialLoginNow('ig')">
+          {{ scBusy === 'ig' ? '等待登入中…（瀏覽器視窗）' : sc?.loggedIn?.ig ? '重新登入 Instagram' : '開啟瀏覽器登入 Instagram' }}
+        </button>
+        <button :disabled="!!scBusy" @click="socialDeepCheck">
+          {{ scChecking ? '檢查中…' : '重新檢查登入狀態' }}
+        </button>
+      </div>
+      <p v-if="scBusy" class="tiny gen-wait">
+        會跳出一個 Chromium 視窗，在裡面登入即可，偵測到登入就會自動關閉（最多等 10 分鐘）。
+      </p>
+      <p v-if="scMsg" class="small" :class="scErr ? 'm-err' : 'm-ok'">{{ scMsg }}</p>
+    </section>
+
+    <section class="card pad stack" style="margin-bottom: 18px">
+      <div class="row">
         <strong class="h2">Facebook 專頁發佈</strong>
         <span class="spacer grow" />
         <span v-if="fb?.connected" class="badge solid" style="background: var(--ok)">已連接：{{ fb.pageName }}</span>
@@ -338,6 +385,96 @@
         </button>
       </div>
       <p v-if="pfMsg" class="small" :class="pfErr ? 'm-err' : 'm-ok'">{{ pfMsg }}</p>
+    </section>
+
+    <section class="card pad stack" style="margin-bottom: 18px">
+      <div class="row">
+        <strong class="h2">定期清理</strong>
+        <span class="spacer grow" />
+        <span v-if="cl?.enabled" class="badge solid" style="background: var(--ok)">
+          每 {{ cl.intervalDays }} 天自動清理
+        </span>
+        <span v-else class="badge">未開啟</span>
+      </div>
+      <p class="small muted" style="margin: 0">
+        貼文與素材越積越多，列表頁就越慢（每次都會把整個資料夾讀一遍，圖片也是原尺寸存的）。
+        開啟後工具每 {{ clForm.intervalDays }} 天會把超過保留天數的資料夾整個刪掉，<strong>刪了無法復原</strong>。
+        還有排程在等的貼文一律不刪。
+      </p>
+      <p v-if="cl" class="tiny faint" style="margin: 0">
+        目前佔用：貼文 {{ mb(cl.usage.posts) }}・素材 {{ mb(cl.usage.inbox) }}
+      </p>
+
+      <div class="row wrap" style="gap: 10px; align-items: flex-end">
+        <label class="chk" :class="{ on: clForm.enabled }">
+          <input v-model="clForm.enabled" type="checkbox" />開啟定期清理
+        </label>
+        <div class="field" style="width: 120px">
+          <label>每幾天一次</label>
+          <input v-model.number="clForm.intervalDays" type="number" min="1" max="90" />
+        </div>
+      </div>
+
+      <div class="platbox stack">
+        <div class="row wrap" style="gap: 10px; align-items: flex-end">
+          <label class="chk" :class="{ on: clForm.posts.enabled }">
+            <input v-model="clForm.posts.enabled" type="checkbox" />清理貼文
+          </label>
+          <div class="field" style="width: 150px">
+            <label>保留最近幾天</label>
+            <input v-model.number="clForm.posts.keepDays" type="number" min="1" :disabled="!clForm.posts.enabled" />
+          </div>
+          <label class="chk" :class="{ on: clForm.posts.onlyPublished }">
+            <input v-model="clForm.posts.onlyPublished" type="checkbox" :disabled="!clForm.posts.enabled" />只刪已發佈的
+          </label>
+        </div>
+        <span class="tiny faint">以貼文「最後修改時間」判斷新舊。取消「只刪已發佈的」會連沒發出去的草稿一起刪。</span>
+      </div>
+
+      <div class="platbox stack">
+        <div class="row wrap" style="gap: 10px; align-items: flex-end">
+          <label class="chk" :class="{ on: clForm.inbox.enabled }">
+            <input v-model="clForm.inbox.enabled" type="checkbox" />清理素材
+          </label>
+          <div class="field" style="width: 150px">
+            <label>保留最近幾天</label>
+            <input v-model.number="clForm.inbox.keepDays" type="number" min="1" :disabled="!clForm.inbox.enabled" />
+          </div>
+          <label class="chk" :class="{ on: clForm.inbox.onlyWritten }">
+            <input v-model="clForm.inbox.onlyWritten" type="checkbox" :disabled="!clForm.inbox.enabled" />只刪已撰寫的
+          </label>
+        </div>
+        <span class="tiny faint">以素材「收進來的時間」判斷新舊。已撰寫的素材內容與圖都已複製到貼文裡了。</span>
+      </div>
+
+      <div v-if="cl" class="tokenbox small">
+        <div>
+          照目前<strong>已儲存</strong>的設定，現在清會刪：貼文 <strong>{{ cl.preview.posts.length }}</strong> 則、素材
+          <strong>{{ cl.preview.inbox.length }}</strong> 則
+          <a v-if="cl.preview.posts.length + cl.preview.inbox.length" href="#" @click.prevent="clShowList = !clShowList">
+            {{ clShowList ? '收起' : '看清單' }}
+          </a>
+        </div>
+        <ul v-if="clShowList" class="tiny muted" style="margin: 6px 0 0; padding-left: 18px; max-height: 200px; overflow-y: auto">
+          <li v-for="t in [...cl.preview.posts, ...cl.preview.inbox]" :key="t.kind + t.id">
+            [{{ t.kind === 'posts' ? '貼文' : '素材' }}] {{ t.title }}<span class="faint">・{{ t.at.slice(0, 10) }}</span>
+          </li>
+        </ul>
+        <div class="tiny faint" style="margin-top: 4px">
+          <template v-if="cl.lastResult">
+            上次清理 {{ when(cl.lastResult.at) }}：貼文 {{ cl.lastResult.posts }}、素材 {{ cl.lastResult.inbox }}，釋出 {{ mb(cl.lastResult.bytes) }}
+          </template>
+          <template v-else>還沒清理過</template>
+          <template v-if="cl.nextAt">・下次預定 {{ when(cl.nextAt) }}（工具要開著）</template>
+        </div>
+      </div>
+
+      <div class="row wrap" style="gap: 8px">
+        <button class="primary" :disabled="clBusy" @click="saveCleanup">儲存</button>
+        <button class="danger" :disabled="clBusy || !cl || !(cl.preview.posts.length + cl.preview.inbox.length)" @click="runCleanupNow">
+          立即清理
+        </button>
+      </div>
     </section>
 
     <section class="card pad stack" style="margin-bottom: 18px">
@@ -676,9 +813,121 @@ async function clearMem() {
   }
 }
 
+interface CleanupTarget { kind: 'posts' | 'inbox'; id: string; title: string; at: string }
+interface CleanupSt {
+  enabled: boolean
+  intervalDays: number
+  posts: { enabled: boolean; keepDays: number; onlyPublished: boolean }
+  inbox: { enabled: boolean; keepDays: number; onlyWritten: boolean }
+  lastRunAt: string
+  lastResult: { at: string; posts: number; inbox: number; bytes: number; failed: number } | null
+  nextAt: string
+  preview: { posts: CleanupTarget[]; inbox: CleanupTarget[] }
+  usage: { posts: number; inbox: number }
+}
+const { data: cl, refresh: refreshCleanup } = await useFetch<CleanupSt>('/api/cleanup')
+const clForm = reactive({
+  enabled: cl.value?.enabled ?? false,
+  intervalDays: cl.value?.intervalDays ?? 7,
+  posts: { ...(cl.value?.posts || { enabled: true, keepDays: 30, onlyPublished: true }) },
+  inbox: { ...(cl.value?.inbox || { enabled: true, keepDays: 14, onlyWritten: true }) }
+})
+const clBusy = ref(false)
+const clShowList = ref(false)
+
+const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`
+function when(iso: string) {
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+async function saveCleanup() {
+  clBusy.value = true
+  try {
+    await $fetch('/api/cleanup', { method: 'PUT', body: clForm })
+    await refreshCleanup()
+    if (cl.value) {
+      clForm.intervalDays = cl.value.intervalDays
+      Object.assign(clForm.posts, cl.value.posts)
+      Object.assign(clForm.inbox, cl.value.inbox)
+    }
+    toast('清理設定已儲存')
+  } catch (e) {
+    toastErr(err(e))
+  } finally {
+    clBusy.value = false
+  }
+}
+
+async function runCleanupNow() {
+  const n = cl.value ? cl.value.preview.posts.length + cl.value.preview.inbox.length : 0
+  if (!confirm(`照已儲存的設定立刻刪除 ${n} 個資料夾（連同圖片）？無法復原。`)) return
+  clBusy.value = true
+  try {
+    const r = await $fetch<{ posts: number; inbox: number; bytes: number; failed: number }>('/api/cleanup/run', {
+      method: 'POST'
+    })
+    await refreshCleanup()
+    toast(`已刪除貼文 ${r.posts}、素材 ${r.inbox}，釋出 ${mb(r.bytes)}` + (r.failed ? `（${r.failed} 則失敗）` : ''))
+  } catch (e) {
+    toastErr(err(e))
+  } finally {
+    clBusy.value = false
+  }
+}
+
 const xBusy = ref(false)
 const xMsg = ref('')
 const xErr = ref(false)
+
+interface SocialStatus {
+  python: string | null; scriptFound: boolean; ready: boolean
+  loggedIn: { fb: boolean; ig: boolean }
+  profile: string; checkedAt: string; deep: boolean; message: string
+}
+const { data: sc, refresh: refreshSocial } = await useFetch<SocialStatus>('/api/social/status')
+const scChecking = ref(false)
+/** 沒在忙是空字串，忙的時候放正在登入的站別 */
+const scBusy = ref<'' | 'fb' | 'ig'>('')
+const scMsg = ref('')
+const scErr = ref(false)
+
+async function socialLoginNow(site: 'fb' | 'ig') {
+  scBusy.value = site
+  scMsg.value = ''
+  try {
+    await $fetch('/api/social/login', { method: 'POST', body: { site } })
+    await refreshSocial()
+    scErr.value = false
+    const name = site === 'fb' ? 'Facebook' : 'Instagram'
+    scMsg.value = `登入成功，之後抓 ${name} 連結會自動帶上這份登入狀態`
+    toast(`${name} 已登入`)
+  } catch (e) {
+    scErr.value = true
+    scMsg.value = err(e)
+  } finally {
+    scBusy.value = ''
+  }
+}
+
+/** 真的開一次 Chromium 驗證兩邊的登入是否還有效 */
+async function socialDeepCheck() {
+  scChecking.value = true
+  scMsg.value = ''
+  try {
+    const d = await $fetch<SocialStatus>('/api/social/status', { query: { deep: '1' } })
+    sc.value = d
+    const on = [d.loggedIn.fb ? 'Facebook' : '', d.loggedIn.ig ? 'Instagram' : ''].filter(Boolean)
+    scErr.value = !on.length
+    scMsg.value = on.length ? on.join('、') + ' 的登入仍然有效' : d.message || '兩邊都未登入'
+  } catch (e) {
+    scErr.value = true
+    scMsg.value = err(e)
+  } finally {
+    scChecking.value = false
+  }
+}
 
 async function xLoginNow() {
   xBusy.value = true
